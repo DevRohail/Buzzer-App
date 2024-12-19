@@ -3,17 +3,17 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 
-// Initialize the app and server
+// Initialize app and server
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
 const port = 3000;
 
-let players = [];  // Store player names
-let gameStarted = false;  // Track if the game has started
+let players = new Set(); // Use a Set to store unique player names (case-sensitive)
+let gameStarted = false; // Track game state
 
-// Serve the main page
+// Serve the player page
 app.get("/", (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -21,7 +21,7 @@ app.get("/", (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Buzzer App</title>
+            <title>Player - Buzzer App</title>
             <style>
                 body {
                     font-family: Arial, sans-serif;
@@ -53,114 +53,88 @@ app.get("/", (req, res) => {
                     font-size: 16px;
                     cursor: pointer;
                     color: white;
-                    margin: 5px;
+                    margin-top: 10px;
+                    background: #f44336;
                     width: 100%;
                     box-sizing: border-box;
-                }
-                button#buzz, button#join {
-                    background: #f44336; /* Red color */
-                }
-                button#buzz:disabled, button#join:disabled {
-                    background: #d32f2f; /* Disabled color */
-                    cursor: not-allowed; 
                 }
                 input {
                     padding: 10px;
                     font-size: 16px;
                     border-radius: 5px;
                     border: none;
-                    margin-bottom: 10px;
+                    margin-top: 10px;
                     width: 100%;
                     box-sizing: border-box;
                 }
-                .hidden {
-                    display: none;
-                }
-
-                /* Mobile-Friendly Design */
-                @media (max-width: 600px) {
-                    h1 {
-                        font-size: 24px;
-                    }
-                    h2 {
-                        font-size: 18px;
-                    }
-                    button {
-                        font-size: 14px;
-                        padding: 8px 16px;
-                    }
+                #status {
+                    margin-top: 20px;
                 }
             </style>
         </head>
         <body>
             <div id="container">
-                <h1 id="title">Buzzer App</h1>
-                <h2 id="status">Set your name to join!</h2>
-                <div id="name-setup">
-                    <input type="text" id="player-name" placeholder="Enter your name">
-                    <button id="join">Join</button>
-                </div>
-                <div id="player-interface" class="hidden">
-                    <h2 id="player-status">Waiting for reset...</h2>
-                    <button id="buzz" disabled>Buzz</button>
-                </div>
+                <h1>Buzzer App</h1>
+                <h2 id="join-text">Enter your name to join:</h2>
+                <input type="text" id="player-name" placeholder="Enter your name">
+                <button id="join">Join</button>
+                <h2 id="status" style="display: none;">Waiting for buzzer to be reset...</h2>
+                <button id="buzz" style="display: none;" disabled>Buzz</button>
             </div>
 
             <script src="/socket.io/socket.io.js"></script>
             <script>
                 const socket = io();
-                const title = document.getElementById("title");
-                const status = document.getElementById("status");
-                const playerStatus = document.getElementById("player-status");
-                const nameInput = document.getElementById("player-name");
                 const joinButton = document.getElementById("join");
                 const buzzButton = document.getElementById("buzz");
-                const nameSetup = document.getElementById("name-setup");
-                const playerInterface = document.getElementById("player-interface");
+                const nameInput = document.getElementById("player-name");
+                const statusText = document.getElementById("status");
+                const joinText = document.getElementById("join-text");
 
                 let playerName = "";
 
-                // Handle join button click
                 joinButton.addEventListener("click", () => {
                     playerName = nameInput.value.trim();
                     if (!playerName) {
-                        alert("Please enter your name.");
+                        alert("Please enter a name.");
                         return;
                     }
-
-                    // Emit a join event with the player's name
                     socket.emit("join", playerName);
                 });
 
-                // Handle buzz button click
                 buzzButton.addEventListener("click", () => {
                     socket.emit("buzz", playerName);
                 });
 
-                // Listen for server events
-                socket.on("buzzed", (player) => {
-                    status.textContent = \`\${player} buzzed in!\`;
-                    playerStatus.textContent = \`\${player} buzzed in!\`;
-                    buzzButton.disabled = true;
-                });
-
-                socket.on("reset", () => {
-                    status.textContent = "Waiting for players to buzz...";
-                    playerStatus.textContent = "Waiting for players to buzz...";
-                    buzzButton.disabled = false;
+                socket.on("join-success", () => {
+                    joinText.style.display = "none";
+                    joinButton.style.display = "none";
+                    nameInput.style.display = "none";
+                    statusText.style.display = "none"; // Hide the status text when player can buzz
+                    buzzButton.style.display = "block";
+                    statusText.textContent = "Waiting for buzzer to be reset..."; // Show the waiting text when player joins
+                    statusText.style.display = "block";
                 });
 
                 socket.on("name-taken", () => {
-                    alert("This name is already taken. Please choose another one.");
-                    nameInput.value = "";  // Clear input field
+                    alert("Name already taken. Please choose another name.");
                 });
 
-                socket.on("join-success", (playerName) => {
-                    // Hide name input and display player interface once name is accepted
-                    nameSetup.classList.add("hidden");
-                    playerInterface.classList.remove("hidden");
-                    status.textContent = "Waiting for reset...";
-                    title.textContent = \`Player: \${playerName}\`;
+                socket.on("buzzed", (player) => {
+                    statusText.style.display = "block";
+                    statusText.textContent = \`\${player} buzzed in!\`;
+                    buzzButton.disabled = true;
+                    socket.emit('update-buzzed', player); // Notify admin panel who buzzed
+                });
+
+                socket.on("reset", () => {
+                    statusText.textContent = "Waiting for buzzer to be reset...";
+                    statusText.style.display = "block";
+                    buzzButton.disabled = false;
+                });
+
+                socket.on("reset-complete", () => {
+                    statusText.style.display = "none"; // Remove the "waiting for buzzer" text after reset
                 });
             </script>
         </body>
@@ -168,7 +142,7 @@ app.get("/", (req, res) => {
     `);
 });
 
-// Admin page for host controls
+// Serve the admin panel
 app.get("/admin", (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -227,8 +201,7 @@ app.get("/admin", (req, res) => {
         <body>
             <h1>Admin Controls</h1>
             <button id="reset">Reset Buzzer</button>
-            <h2>Waiting for players to buzz...</h2>
-            <h3 id="player-status">No player has buzzed yet.</h3>
+            <h2 id="game-status">Waiting for buzzer to reset...</h2>
         
             <script src="/socket.io/socket.io.js"></script>
             <script>
@@ -241,12 +214,12 @@ app.get("/admin", (req, res) => {
 
                 // Update player buzzed information
                 socket.on("buzzed", (player) => {
-                    document.getElementById("player-status").textContent = \`\${player} has buzzed!\`;
+                    document.getElementById("game-status").textContent = \`\${player} has buzzed!\`; // Display player who buzzed
                 });
 
                 socket.on("reset", () => {
-                    document.querySelector("h2").textContent = "Waiting for players to buzz...";
-                    document.getElementById("player-status").textContent = "No player has buzzed yet.";
+                    document.getElementById("game-status").textContent = "Waiting for player to buzz..."; // Reset message after reset
+                    socket.emit("reset-complete"); // Notify player screens to remove waiting text
                 });
             </script>
         </body>
@@ -254,46 +227,47 @@ app.get("/admin", (req, res) => {
     `);
 });
 
-// Handle player joining
+// Handle socket events
 io.on("connection", (socket) => {
     console.log("A user connected");
 
-    // Listen for join requests
     socket.on("join", (playerName) => {
-        // Ensure case-insensitive name conflict check
-        if (players.some(existingPlayer => existingPlayer.toLowerCase() === playerName.toLowerCase())) {
-            socket.emit("name-taken"); // Emit event if name is taken
+        const lowerCaseName = playerName.toLowerCase(); // Convert to lowercase for consistent comparison
+        if (Array.from(players).some(player => player.toLowerCase() === lowerCaseName)) {
+            socket.emit("name-taken");
         } else {
-            players.push(playerName); // Add new player
-            console.log(`${playerName} has joined.`);
-            socket.emit("join-success", playerName); // Notify player of success
+            players.add(playerName); // Add original case-sensitive name
+            io.emit("players-update", Array.from(players)); // Notify admin
+            socket.emit("join-success");
         }
     });
 
-    // Handle buzz requests
     socket.on("buzz", (playerName) => {
-        if (gameStarted) {
-            console.log(`${playerName} buzzed!`);
-            io.emit("buzzed", playerName); // Notify both admin and players
-            gameStarted = false; // Disable further buzzes until reset
-        }
+        io.emit("buzzed", playerName); // Notify all players and admin when someone buzzes
     });
 
-    // Handle reset requests
     socket.on("reset", () => {
-        console.log("Resetting buzzer");
-        players = []; // Clear the player list
-        gameStarted = true; // Allow players to buzz again
-        io.emit("reset"); // Notify everyone that the game has been reset
+        players.clear(); // Clear player list
+        io.emit("reset"); // Notify players and admin to reset
     });
 
-    // Disconnect handler
+    socket.on("reset-complete", () => {
+        io.emit("reset-complete"); // Notify player screens to remove waiting text
+    });
+
     socket.on("disconnect", () => {
         console.log("A user disconnected");
+        // Remove player from the list on disconnect
+        players.forEach((player) => {
+            if (player === socket.id) {
+                players.delete(player);
+            }
+        });
+        io.emit("players-update", Array.from(players)); // Update the admin with the player list
     });
 });
 
 // Start the server
 server.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
+    console.log(`Server running on port ${port}`);
 });
